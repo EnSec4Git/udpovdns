@@ -34,15 +34,28 @@ MAX_TXT_RECORD_SIZE = 253
 class RecvFromUdp(DatagramProtocol):
     def __init__(self):
         self.receivedData = []
+        self.deferreds = []
 
     def datagramReceived(self, data, (host, port)):
         print("Received data!: ", host, port, "\nData: ", data)
-        self.receivedData.append((data, host, port))
+        if not self._deferreds_empty():
+            print("Slow and steady won the race!")
+            d = self.deferreds[0]
+            del self.deferreds[0]
+            d.callback((data, host, port))
+        else:
+            self.receivedData.append((data, host, port))
     
     def getData(self):
         data = self.receivedData[0]
         del self.receivedData[0]
         return data
+    
+    def addDeferred(self, d):
+        self.deferreds.append(d)
+    
+    def _deferreds_empty(self):
+        return len(self.deferreds) == 0
 
     def empty(self):
         return len(self.receivedData) == 0
@@ -175,22 +188,31 @@ class FakeResolver(client.Resolver):
                 port_int = int(port_str)
                 print("Recv from:", port_int)
                 if not port_int in self.udpObjects:
-                    return self._empty_txt_record_deferred()
+                    return self._empty_txt_record_deferred(name)
                 datagramObject = self.receivers[port_int]
-                if datagramObject.empty():
+                def firstCallback(dt):
+                    data_not_encoded = dt[0]
+                    data_encoded = base64.b32encode(data_not_encoded)
+                    data_encoded = data_encoded.translate(None, '=')
+                    print(data_not_encoded)
+                    print(data_encoded)
+                    chunk_list = list(self._chunks(data_encoded, MAX_TXT_RECORD_SIZE))
+                    print(chunk_list)
+                    responses = list(map(lambda x: dns.RRHeader(name, dns.TXT, dns.IN, self.ttl, dns.Record_TXT(x),), chunk_list))
+                    print(responses)
+                    return responses
+                def secondCallback(resp):
+                    return [resp, (), ()]
+                if datagramObject.empty(): # Data has not yet arrived; Should wait
                     print("Recv is empty")
-                    return self._empty_txt_record_deferred()
-                data_not_encoded = datagramObject.getData()[0]
-                data_encoded = base64.b32encode(data_not_encoded)
-                data_encoded = data_encoded.translate(None, '=')
-                print(data_not_encoded)
-                print(data_encoded)
-                chunk_list = list(self._chunks(data_encoded, MAX_TXT_RECORD_SIZE))
-                print(chunk_list)
-                responses = list(map(lambda x: dns.RRHeader(name, dns.TXT, dns.IN, self.ttl, dns.Record_TXT(x),), chunk_list))
-                print(responses)
+                    defd = defer.Deferred()
+                    defd.addCallback(firstCallback)
+                    defd.addCallback(secondCallback)
+                    datagramObject.addDeferred(defd)
+                    return defd
+                    #return self._empty_txt_record_deferred()
                 return defer.succeed([
-                responses, (), ()])
+                firstCallback(datagramObject.getData()), (), ()])
             elif name.endswith(CLS_FAKE_SUFFIX):
                 port_str = name[:-len(CLS_FAKE_SUFFIX)-1]
                 port_int = int(port_str)

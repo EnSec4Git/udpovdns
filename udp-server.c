@@ -5,6 +5,7 @@
 #include <netinet/in.h>
 #include <stdio.h>
 #include <strings.h>
+#include <unistd.h>
 
 int main(int argc, char**argv)
 {
@@ -25,6 +26,7 @@ int main(int argc, char**argv)
    {
       len = sizeof(cliaddr);
       n = recvfrom(sockfd,mesg,1000,0,(struct sockaddr *)&cliaddr,&len);
+      //sleep(5);
       sendto(sockfd,mesg,n,0,(struct sockaddr *)&cliaddr,sizeof(cliaddr));
       printf("-------------------------------------------------------\n");
       mesg[n] = 0;
