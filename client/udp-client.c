@@ -21,6 +21,8 @@ int main(int argc, char**argv)
       printf("usage:  udpcli <IP address>\n");
       exit(1);
    }
+   
+   init_dns("a.a");
 
    sockfd=socket_dns(AF_INET,SOCK_DGRAM,0);
 
@@ -36,6 +38,7 @@ int main(int argc, char**argv)
       n=recvfrom_dns(sockfd,recvline,10000,0,NULL,NULL);
       recvline[n]=0;
       fputs(recvline,stdout);
+      printf("\n");
    }
    return 0;
 }

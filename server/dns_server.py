@@ -37,7 +37,7 @@ class RecvFromUdp(DatagramProtocol):
 
     def datagramReceived(self, data, (host, port)):
         print("Received data!: ", host, port, "\nData: ", data)
-        self.receivedData = append(self.receivedData, (data, host, port))
+        self.receivedData.append((data, host, port))
     
     def getData(self):
         data = self.receivedData[0]
@@ -45,7 +45,7 @@ class RecvFromUdp(DatagramProtocol):
         return data
 
     def empty(self):
-        return len(data) == 0
+        return len(self.receivedData) == 0
 
 class FakeResolver(client.Resolver):
     def __init__(self, servers):
@@ -53,6 +53,7 @@ class FakeResolver(client.Resolver):
         self.ttl = 1
         self.ports = {}
         self.udpObjects = {}
+        self.receivers = {}
         self.dataObjectsToSend = {}
 
     def _getSampleText(self, name):
@@ -79,7 +80,7 @@ class FakeResolver(client.Resolver):
     def _localhost_a_record(self, name):
         return [[dns.RRHeader(name, dns.A, dns.IN, self.ttl, dns.Record_A('127.0.0.1', self.ttl),)], (), ()]
     
-    def _chunks(l, n):
+    def _chunks(self, l, n):
         """ Yield successive n-sized chunks from l.
         Attribution: Ned Batchdeler
         SO: http://stackoverflow.com/questions/312443/how-do-you-split-a-list-into-evenly-sized-chunks-in-python
@@ -119,7 +120,10 @@ class FakeResolver(client.Resolver):
                         pass
                     else:
                         self.ports[free_port] = portSocket
-                        self.udpObjects[free_port] = reactor.adoptDatagramPort(portSocket.fileno(), socket.AF_INET, RecvFromUdp())
+                        receiver = RecvFromUdp()
+                        self.receivers[free_port] = receiver
+                        self.udpObjects[free_port] = reactor.adoptDatagramPort(portSocket.fileno(), socket.AF_INET, receiver)
+                        print("Gave port ", free_port)
                         break
                     free_port = self._get_free_port()
                 return defer.succeed([
@@ -127,7 +131,7 @@ class FakeResolver(client.Resolver):
             elif name.endswith(SND_FAKE_SUFFIX):
                 useful = name[:-len(SND_FAKE_SUFFIX)-1]
                 parts = useful.split(".")
-                local_port = parts[-1]
+                local_port = int(parts[-1])
                 print("Local port: ", local_port)
                 if not local_port in self.ports:
                     print("Local port is closed...")
@@ -135,7 +139,7 @@ class FakeResolver(client.Resolver):
                     [dns.RRHeader(name, dns.TXT, dns.IN, self.ttl, dns.Record_TXT(PORT_NOT_OPEN),)],
                     (), ()])
                 print("Local port is open!")
-                remote_port = int(parts[-2])
+                remote_port = socket.ntohs(int(parts[-2]))
                 remote_packed_addr_dec = socket.ntohl(int(parts[-3]))
                 remote_packed_addr = ""
                 for i in range(0, 4):
@@ -158,8 +162,11 @@ class FakeResolver(client.Resolver):
                 if eot: # End of transmission
                     padded_data = self._pad_base32(total_data)
                     my_socket = self.ports[local_port]
-                    print(padded_data)
-                    my_socket.sendto(padded_data, (remote_addr, remote_port))
+                    raw_data = base64.b32decode(padded_data)
+                    print("Sending: ", raw_data)
+                    print("Socket: ", my_socket)
+                    print("TO: ", remote_addr, remote_port)
+                    my_socket.sendto(raw_data, (remote_addr, remote_port))
                     del self.dataObjectsToSend[conn_id]
                 return defer.succeed([
                 [dns.RRHeader(name, dns.TXT, dns.IN, self.ttl, dns.Record_TXT(PARTOK),)], (), ()])
@@ -169,13 +176,15 @@ class FakeResolver(client.Resolver):
                 print("Recv from:", port_int)
                 if not port_int in self.udpObjects:
                     return self._empty_txt_record_deferred()
-                datagramObject = udpObjects[port_int]
+                datagramObject = self.receivers[port_int]
                 if datagramObject.empty():
                     print("Recv is empty")
                     return self._empty_txt_record_deferred()
-                data_not_encoded = datagramObject.getData()
-                print(data_not_encoded)
+                data_not_encoded = datagramObject.getData()[0]
                 data_encoded = base64.b32encode(data_not_encoded)
+                data_encoded = data_encoded.translate(None, '=')
+                print(data_not_encoded)
+                print(data_encoded)
                 chunk_list = list(self._chunks(data_encoded, MAX_TXT_RECORD_SIZE))
                 print(chunk_list)
                 responses = list(map(lambda x: dns.RRHeader(name, dns.TXT, dns.IN, self.ttl, dns.Record_TXT(x),), chunk_list))
@@ -192,6 +201,7 @@ class FakeResolver(client.Resolver):
                 portSocket.close()
                 del self.ports[port_int]
                 del self.udpObjects[port_int]
+                del self.receivers[port_int]
             return defer.succeed([
             [dns.RRHeader(name, dns.TXT, dns.IN, self.ttl, dns.Record_TXT(self._getSampleText(name)),),
             ], (), ()])

@@ -25,7 +25,7 @@ static char* CLS_SUFFIX; // = "cls.a.a";
 
 std::map<int, int> file_descriptor_table;
 std::map<int, int> fd_to_port_table;
-std::map<int, std::string> remote_port_table;
+std::map<int, int> remote_port_table;
 std::set<int> used_ports;
 
 extern "C" void init_dns(const char* root_domain) {
@@ -98,7 +98,10 @@ extern "C" int socket_dns(int __domain, int __type, int __protocol) {
 	file_descriptor_table[pipefds[0]] = pipefds[1];
 	int len;
 	char* newsock = (char*)txt_info_for_hostname(SOCK_SUFFIX, &len, false);
-	remote_port_table[pipefds[0]] = std::string(newsock);
+    int newport;
+    sscanf(newsock, "%d", &newport);
+    //printf("Newsock: %s\n", newsock);
+	remote_port_table[pipefds[0]] = newport;
 	free(newsock);
 	return pipefds[0];
 }
@@ -159,7 +162,7 @@ extern "C" ssize_t sendto_dns(int sockfd, const void *buf, size_t len, int flags
 		bind_dns(sockfd, (const struct sockaddr*)&addr, sizeof(sockaddr_in));
 	}
 	// Get virtual "port" number responding to this file descriptor
-	port = fd_to_port_table[sockfd];
+	port = remote_port_table[sockfd];
 	sprintf(static_vars, "%d.%d.%d.", real_addr->sin_addr.s_addr, real_addr->sin_port, port);
 	
 	// Calculate useful and unused parts of the hostname
@@ -203,18 +206,19 @@ extern "C" ssize_t sendto_dns(int sockfd, const void *buf, size_t len, int flags
 		written_data_pt += strlen(static_vars);
 		memcpy(current_hostname + written_data_pt, SEND_SUFFIX, strlen(SEND_SUFFIX));
 		written_data_pt += strlen(SEND_SUFFIX);
+        current_hostname[written_data_pt] = '\0';
 		
 		//TODO: Remove this
-		current_hostname[written_data_pt] = '\0';
-		printf("%s\n", current_hostname);
+		/*current_hostname[written_data_pt] = '\0';
+		printf("%s\n", current_hostname);*/
 		
 		// Send data
 		answer_received = (char* )txt_info_for_hostname(current_hostname, &answer_size, false);
 		// TODO: Remove this
-		printf("%s\n", answer_received);
+		//printf("%s\n", answer_received);
 		if(strcmp(answer_received, "PARTOK") != 0) {
 			// TODO: Set an error code or something...
-			printf("Error!\n");
+			//printf("Error!\n");
 			break;
 		}
 		
@@ -230,15 +234,15 @@ payload_free:
 extern "C" ssize_t recvfrom_dns(int sockfd, void *buf, size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen) {
 	assert(src_addr == NULL);
 	assert(addrlen == NULL);
-	int port = fd_to_port_table[sockfd];
+	int port = remote_port_table[sockfd];
 	char prt[7];
 	sprintf(prt, "%d.", port);
 	std::string full_address = prt;
 	full_address += RECV_SUFFIX;
 	int data_read;
-	printf("%s\n", full_address.c_str());
+	//printf("%s\n", full_address.c_str());
 	unsigned char* result = txt_info_for_hostname(full_address.c_str(), &data_read, true);
-	printf("%s\n", result);
+	//printf("%s\n", result);
 	memcpy(buf, result, std::min(len, (size_t)data_read));
 	free(result);
 	return data_read;
