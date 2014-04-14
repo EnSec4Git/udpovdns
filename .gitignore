@@ -1,0 +1,7 @@
+# UDP Server binary
+udp-server
+
+# Twisted-related temp files
+server/twistd.pid
+server/twistd.log
+
