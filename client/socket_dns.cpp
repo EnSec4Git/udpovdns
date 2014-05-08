@@ -9,10 +9,19 @@
 #include <strings.h>
 #include <string.h>
 #include <stdlib.h>
+#include <netinet/in.h>
+#include <arpa/nameser.h>
+#include <arpa/inet.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <resolv.h>
+#include <netdb.h>
 extern "C" {
 #include "base32.h"
 }
 #include "socket_dns.h"
+
+#include <stdio.h>
 
 #define DOTS_PER_NAME 4
 #define MAX_LABEL_SIZE 63
@@ -49,16 +58,63 @@ extern "C" void init_dns(const char* root_domain) {
 	strcpy(CLS_SUFFIX, tmp.c_str());
 }
 
+static void print_buffer(const char* buffer, int size) {
+	printf("Start\n");
+	for(int i=0; i<size; i++) {
+		printf("%x_", buffer[i]);
+	}
+	printf("\nEnd\n");
+}
+
 // for(int i=0; i<100; i++) {
 //     printf("I won't call perl scripts from 'system' functions!\n");
 // }
 unsigned char* txt_info_for_hostname(const char* domain, int *txt_len, bool decode) {
 	assert(strlen(domain) < 256);
 	FILE *fp;
+	int i=0;
 	char path[100];
 	std::string real_result;
+	char* result;
+	char* aux_result;
 	char command[325]; // Somewhat arbitrary limit, but txt_len must
 	// be less than 256 characters in size
+	
+	/* Attribution:
+	 http://wiki.shellium.org/w/DNS_functions_%28example_program%29 */
+	
+	unsigned char query_buffer[1024];
+	ns_msg query_msg;
+	ns_rr query_rr;
+	int query_result = res_query(domain, C_IN, T_TXT, query_buffer, sizeof(query_buffer));
+	
+	if(query_result == -1) {
+		// TODO: Return an error code or something
+		goto error_ret;
+	}
+	if(ns_initparse(query_buffer, query_result, &query_msg) == -1) {
+		goto error_ret;
+	}
+	for (i = 0; i < ns_msg_count(query_msg, ns_s_an); i++) {
+		if (ns_parserr(&query_msg, ns_s_an, i, &query_rr)) {
+			goto error_ret;
+		}
+		if (ns_rr_type(query_rr) == ns_t_txt) {
+			const unsigned char* data1 = ns_rr_rdata(query_rr);
+			aux_result = (char*)
+				malloc(sizeof(char) * ns_rr_rdlen(query_rr));
+			memcpy(aux_result, data1, ns_rr_rdlen(query_rr));
+			if(!aux_result) {
+				goto error_ret;
+			}
+			printf("NS_TXT!\n");
+			//printf("%s", (const char*)data1);
+			//printf("\n");
+			print_buffer((const char*)data1, ns_rr_rdlen(query_rr) + 32);
+			//printf("ENDOFTEXT\n");
+		}
+	}
+	
 	if(decode) {
 		sprintf(command, "nslookup %s | ./extract_and_decode.pl", domain);
 	} else {
@@ -79,7 +135,7 @@ unsigned char* txt_info_for_hostname(const char* domain, int *txt_len, bool deco
 	/* close */
 	pclose(fp);
 	
-	char* result = (char *)malloc(sizeof(char) * (real_result.length() + 1));
+	result = (char *)malloc(sizeof(char) * (real_result.length() + 1));
 	if(!result) {
 		return NULL;
 	}
@@ -87,7 +143,14 @@ unsigned char* txt_info_for_hostname(const char* domain, int *txt_len, bool deco
 	strcpy(result, real_result.c_str());
 	*txt_len = real_result.length();
 	
+	print_buffer(result, *txt_len);
+	print_buffer(aux_result, query_result);
+	
 	return (unsigned char*)result;
+	
+error_ret:
+	*txt_len = 0;
+	return NULL;
 }
 
 extern "C" int socket_dns(int __domain, int __type, int __protocol) {
@@ -231,7 +294,8 @@ payload_free:
 	return result_written * (5.0 / 8);
 }
 
-extern "C" ssize_t recvfrom_dns(int sockfd, void *buf, size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen) {
+extern "C" ssize_t recvfrom_dns(int sockfd, void *buf, size_t len,
+ int flags, struct sockaddr *src_addr, socklen_t *addrlen) {
 	assert(src_addr == NULL);
 	assert(addrlen == NULL);
 	int port = remote_port_table[sockfd];
@@ -241,13 +305,15 @@ extern "C" ssize_t recvfrom_dns(int sockfd, void *buf, size_t len, int flags, st
 	full_address += RECV_SUFFIX;
 	int data_read;
 	//printf("%s\n", full_address.c_str());
-	unsigned char* result = txt_info_for_hostname(full_address.c_str(), &data_read, true);
+	unsigned char* result = txt_info_for_hostname(full_address.c_str(),
+	 &data_read, true);
 	//printf("%s\n", result);
 	memcpy(buf, result, std::min(len, (size_t)data_read));
 	free(result);
 	return data_read;
 }
 
+// Usage example
 /*
 int main() {
 	init_dns("a.a");
@@ -266,7 +332,8 @@ int main() {
 	in_addr ipaddr;
 	inet_pton(AF_INET, "192.168.5.4", &ipaddr);
 	address.sin_addr = ipaddr;
-	sendto_dns(12, buffer, 1000, 0, (sockaddr*)&address, sizeof(address));
+	sendto_dns(12,buffer, 1000, 0, (sockaddr*)&address, 
+	 sizeof(address));
 	return 0;
 }
 */

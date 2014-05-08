@@ -1,7 +1,8 @@
 udpovdns
 ========
 
-A simple UDP over DNS implementation, containing a server and a client
+A simple UDP over DNS implementation, containing a sample server
+and client.
 
 Requirements
 ========
@@ -20,5 +21,5 @@ NOTE
 
 The server component requires an installation of the Twisted framework,
 version >= 13.2.0. This is needed due to the usage of the
-`adoptDatagramPort` function, that is available in a specific reactor,
-and reactor selection is available in only newer versions of Twisted.
+`adoptDatagramPort()` function, that is available in a specific reactor,
+and reactor selection is available only in newer versions of Twisted.

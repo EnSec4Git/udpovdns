@@ -5,7 +5,7 @@ CFLAGS=-Wall
 all: example
 
 example: base32 socket_dns
-	@gcc -Wall -g -o bin/udp-client udp-client.c bin/socket_dns.o bin/libbase32.a -lstdc++ -lm
+	@gcc -Wall -g -o bin/udp-client udp-client.c bin/socket_dns.o bin/libbase32.a -lresolv -lstdc++ -lm
 	@cp extract.pl bin/extract.pl
 	@cp extract_and_decode.pl bin/extract_and_decode.pl
 
@@ -16,7 +16,7 @@ base32.o: mkbin
 	@$(CC) -Wall -g -std=c99 -c -o bin/base32.o base32.c
 
 socket_dns: mkbin
-	@$(CXX) -g -o bin/socket_dns.o -c -Wall -lresolve socket_dns.cpp
+	@$(CXX) -g -o bin/socket_dns.o -c -Wall socket_dns.cpp
 	
 mkbin:
 	@mkdir -p bin
